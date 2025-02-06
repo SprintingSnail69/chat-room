@@ -1,18 +1,10 @@
-import { initializeApp } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-app.js";
-import { getFirestore, doc, setDoc, addDoc, collection, onSnapshot, serverTimestamp, query, orderBy, getDoc } from "https://www.gstatic.com/firebasejs/9.17.1/firebase-firestore.js";
+import { createClient } from '/@supabase/supabase-js'
 
-// Firebase configuration
-const firebaseConfig = {
-  apiKey: "AIzaSyDMGCzjVLZUVZHCCxBDql5npVz_wcKxEX4",
-  authDomain: "chat-room-eda59.firebaseapp.com",
-  projectId: "chat-room-eda59",
-  storageBucket: "chat-room-eda59.appspot.com",
-  messagingSenderId: "1063922969354",
-  appId: "1:1063922969354:web:c1693925c907a1681368f3"
-};
+const supabaseUrl = 'https://izafldmmcavastfszrat.supabase.co'
+const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Iml6YWZsZG1tY2F2YXN0ZnN6cmF0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3Mzg4NTg0MzQsImV4cCI6MjA1NDQzNDQzNH0.GxiftXVf1FpJtUx8G1v6bDD8YxoDTkXGAyJ3bOj-5fQ'
 
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
+const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
 
 // DOM elements
 const usernameInput = document.getElementById("username");
@@ -30,43 +22,6 @@ const roomTitle = document.getElementById("room-id");
 let roomId;
 let username;
 
-// Perspective API key
-const perspectiveApiKey = 'AIzaSyDQpDRlAG4toBVY2vzV1blqwx9VzC1U0HA';
-
-// Function to check for profanity using Perspective API
-async function containsProfanity(message) {
-  const url = `https://commentanalyzer.googleapis.com/v1alpha1/comments:analyze?key=${perspectiveApiKey}`;
-  const data = {
-    comment: { text: message },
-    languages: ["en"],
-    requestedAttributes: {
-      TOXICITY: {},
-      SEVERE_TOXICITY: {},
-      INSULT: {},
-      PROFANITY: {},
-      THREAT: {}
-    }
-  };
-
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
-    body: JSON.stringify(data)
-  });
-
-  const result = await response.json();
-  const scores = result.attributeScores;
-
-  return (
-    scores.TOXICITY.summaryScore.value >= 0.3 ||
-    scores.SEVERE_TOXICITY.summaryScore.value >= 0.3 ||
-    scores.INSULT.summaryScore.value >= 0.3 ||
-    scores.PROFANITY.summaryScore.value >= 0.3 ||
-    scores.THREAT.summaryScore.value >= 0.3
-  );
-}
 
 // Toast notification
 function showToast(message) {
@@ -87,69 +42,92 @@ function clearChatBox() {
 }
 
 // Listen for new messages in the Firestore database
-function listenForMessages() {
-  const q = query(collection(db, "rooms", roomId, "messages"), orderBy("timestamp"));
-  onSnapshot(q, (snapshot) => {
-    snapshot.docChanges().forEach((change) => {
-      if (change.type === "added") {
-        const { username, text } = change.doc.data();
+async function listenForMessages() {
+  const { data: messages, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('room_id', roomId)
+    .order('created_at');
+
+  if (error) {
+    console.error("Error fetching messages:", error);
+    return;
+  }
+
+  messages.forEach(message => {
+    const msgEl = document.createElement("p");
+    const usernameSpan = document.createElement("span");
+    usernameSpan.style.color = "#1f51ff";
+    usernameSpan.textContent = message.username;
+    usernameSpan.style.fontWeight = "bold";
+    const messageText = document.createTextNode(`: ${message.text}`);
+    msgEl.appendChild(usernameSpan);
+    msgEl.appendChild(messageText);
+    chatBox.appendChild(msgEl);
+  });
+
+  chatBox.scrollTop = chatBox.scrollHeight;
+
+  supabase
+    .from('messages')
+    .on('*', async (event) => {
+      const { data: messages } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('room_id', roomId)
+        .order('created_at');
+      clearChatBox();
+      messages.forEach(message => {
         const msgEl = document.createElement("p");
         const usernameSpan = document.createElement("span");
         usernameSpan.style.color = "#1f51ff";
-        usernameSpan.textContent = username;
+        usernameSpan.textContent = message.username;
         usernameSpan.style.fontWeight = "bold";
-        const messageText = document.createTextNode(`: ${text}`);
+        const messageText = document.createTextNode(`: ${message.text}`);
         msgEl.appendChild(usernameSpan);
         msgEl.appendChild(messageText);
         chatBox.appendChild(msgEl);
-      }
-    });
-    chatBox.scrollTop = chatBox.scrollHeight;
-  });
+      });
+      chatBox.scrollTop = chatBox.scrollHeight;
+    })
+    .subscribe()
 }
+
 
 // Function to validate username
 async function validateUsername(username) {
-if (username.length > 40) {
-showToast("shorten ur username lol");
-return false;
-}
-if (await containsProfanity(username)) {
-showToast("you thought :P");
-return false;
-}
-return true;
+  if (username.length > 40) {
+    showToast("shorten ur username lol");
+    return false;
+  }
+  return true;
 }
 
 // Create a new room
 createRoomBtn.addEventListener("click", async () => {
-username = usernameInput.value.trim();
-if (!username) return showToast("you forgot your username ._.");
+  username = usernameInput.value.trim();
+  if (!username) return showToast("you forgot your username ._.");
 
-if (!(await validateUsername(username))) return; // Validate username
+  if (!(await validateUsername(username))) return; // Validate username
 
-roomId = Math.random().toString(36).substring(2, 8);
-await setDoc(doc(db, "rooms", roomId), {});
-roomTitle.textContent = `${roomId}`;
-showChatSection();
-listenForMessages();
+  roomId = Math.random().toString(36).substring(2, 8);
+  roomTitle.textContent = `${roomId}`;
+  showChatSection();
+  listenForMessages();
 });
 
 // Join an existing room
 joinRoomBtn.addEventListener("click", async () => {
-username = usernameInput.value.trim();
-roomId = roomCodeInput.value.trim();
+  username = usernameInput.value.trim();
+  roomId = roomCodeInput.value.trim();
 
-if (!username || !roomId) return showToast("forgetting something? (room code and/or username)");
+  if (!username || !roomId) return showToast("forgetting something? (room code and/or username)");
 
-if (!(await validateUsername(username))) return; // Validate username
+  if (!(await validateUsername(username))) return; // Validate username
 
-const roomDoc = await getDoc(doc(db, "rooms", roomId));
-if (!roomDoc.exists()) return showToast("we couldn't find that room :(");
-
-roomTitle.textContent = `${roomId}`;
-showChatSection();
-listenForMessages();
+  roomTitle.textContent = `${roomId}`;
+  showChatSection();
+  listenForMessages();
 });
 
 // Send a message
@@ -160,28 +138,30 @@ messageInput.addEventListener("keydown", (e) => {
 
 async function sendMessage() {
   let message = messageInput.value.trim();
-  
+
   if (!message) return;
-  
+
   // Check if the message is longer than 100 characters
   if (message.length > 300 || message.length < 2) {
     showToast("stop trying to break the chat or spell something out.");
     return;
   }
 
-  // Check for profanity using Perspective API
-  if (await containsProfanity(message)) {
-    showToast("nice try buddy. not having another incident.");
-    return;
-  }
+  // Send message to Supabase
+  const { error } = await supabase
+    .from('messages')
+    .insert([{
+      room_id: roomId,
+      username: username,
+      text: message
+    }]);
 
-  // Send message to Firestore
-  await addDoc(collection(db, "rooms", roomId, "messages"), {
-    username,
-    text: message,
-    timestamp: serverTimestamp()
-  });
-  messageInput.value = ""; // Clear the input field
+  if (error) {
+    console.error("Error sending message:", error);
+    showToast("Error sending message. Please try again.");
+  } else {
+    messageInput.value = ""; // Clear the input field
+  }
 }
 
 
@@ -196,16 +176,16 @@ leaveRoomBtn.addEventListener("click", () => {
 
 const roomCodeElement = document.getElementById("room-id");
 roomCodeElement.addEventListener("click", () => {
-const roomCode = roomCodeElement.textContent.trim(); 
-console.log("Room Code: ", roomCode); 
-navigator.clipboard.writeText(roomCode)
-.then(() => showToast("code copied to clipboard :D"))
-.catch((error) => console.error("looks like we couldn't copy that text. \n error:", error));
+  const roomCode = roomCodeElement.textContent.trim();
+  console.log("Room Code: ", roomCode);
+  navigator.clipboard.writeText(roomCode)
+    .then(() => showToast("code copied to clipboard :D"))
+    .catch((error) => console.error("looks like we couldn't copy that text. \n error:", error));
 });
 
 if (event.key.length === 1 && event.key.match(/[a-z]/i)) {
-const textBox = document.getElementById('message-input');
-if (message-input) {
-  message-input.focus();
-}
+  const textBox = document.getElementById('message-input');
+  if (message - input) {
+    message - input.focus();
+  }
 }

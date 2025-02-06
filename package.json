@@ -1,0 +1,14 @@
+{
+    "name": "name",
+    "description": "description",
+    "authors": "author",
+    "version": "1.0.0",
+    "main": "pathToMain",
+    "dependencies": {
+      "live-server": "1.2.2",
+      "@supabase/supabase-js": "^2.0.0" 
+    },
+    "scripts": {
+      "start": "live-server"
+    }
+  }
